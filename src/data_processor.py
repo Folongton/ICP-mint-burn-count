@@ -18,7 +18,7 @@ except ImportError:
 class ICPDataProcessor:
     """Processes ICP ledger API data for analysis and visualization."""
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = "output_data"):
         """
         Initialize the data processor.
         
