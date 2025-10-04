@@ -15,6 +15,7 @@ from src.prediction_models import (
     predict_zero_with_acceleration,
     ensemble_zero_prediction
 )
+from src.data_refresh import get_fresh_data
 
 # Page configuration
 st.set_page_config(
@@ -64,11 +65,19 @@ st.markdown("""
 
 @st.cache_data
 def load_and_process_data():
-    """Load and process the ICP supply data"""
+    """Load and process the ICP supply data with automatic refresh"""
     try:
-        # Load data
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_file = os.path.join(current_dir, "output_data", "icp_supply_data_2023-10-01_to_2025-10-03_20251003_211226.csv")
+        # Check for fresh data and refresh if needed
+        csv_file, was_refreshed = get_fresh_data()
+        
+        if csv_file is None:
+            st.error("❌ No data available. Please check your connection and try again.")
+            return None, None, None, None, None, None
+        
+        if was_refreshed:
+            st.success("🔄 Data successfully updated with latest information!")
+            # Clear cache to force reload with new data
+            st.cache_data.clear()
         
         if not os.path.exists(csv_file):
             st.error(f"Data file not found: {csv_file}")
