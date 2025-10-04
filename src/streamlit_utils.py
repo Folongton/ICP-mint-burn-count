@@ -115,7 +115,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
         y=df_adj_sorted['change_7d_avg'],
         mode='lines',
         name='7-Day Avg',
-        line=dict(color='orange', width=2),
+        line=dict(color='#FFB74D', width=2),  # Softer orange
         hovertemplate='<b>7-Day Avg</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
     ))
 
@@ -124,7 +124,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
         y=df_adj_sorted['change_30d_avg'],
         mode='lines',
         name='30-Day Avg',
-        line=dict(color='blue', width=2),
+        line=dict(color='#5B9BD5', width=2),  # Softer blue
         hovertemplate='<b>30-Day Avg</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
     ))
 
@@ -134,7 +134,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
     # Add monthly trend lines
     monthly_traces = []
     for i, (period, trend_data) in enumerate(monthly_trends.items()):
-        slope_color = 'red' if trend_data['slope'] > 0 else 'green'
+        slope_color = '#FF4444' if trend_data['slope'] > 0 else '#00C853'  # More vibrant red/green
         
         fig.add_trace(go.Scatter(
             x=trend_data['x'], 
@@ -151,7 +151,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
     # Add quarterly trend lines
     quarterly_traces = []
     for i, (period, trend_data) in enumerate(quarterly_trends.items()):
-        slope_color = 'red' if trend_data['slope'] > 0 else 'green'
+        slope_color = '#FF4444' if trend_data['slope'] > 0 else '#00C853'  # More vibrant red/green
         
         fig.add_trace(go.Scatter(
             x=trend_data['x'], 
@@ -168,7 +168,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
     # Add yearly trend lines
     yearly_traces = []
     for i, (period, trend_data) in enumerate(yearly_trends.items()):
-        slope_color = 'red' if trend_data['slope'] > 0 else 'green'
+        slope_color = '#FF4444' if trend_data['slope'] > 0 else '#00C853'  # More vibrant red/green
         
         fig.add_trace(go.Scatter(
             x=trend_data['x'], 
@@ -190,7 +190,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
             y=trend_data['y'],
             mode='lines',
             name='Overall Trend',
-            line=dict(color='purple', width=3),
+            line=dict(color='#BA68C8', width=3),  # Softer purple
             visible=False,  # Initially hidden
             hovertemplate=f'<b>Overall Trend</b><br>Date: %{{x}}<br>Supply Change: %{{y:.0f}}<br>Slope: {trend_data["slope"]:.2e}<extra></extra>'
         ))
@@ -241,9 +241,9 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
                 direction="down",
                 pad={"r": 10, "t": 10},
                 showactive=True,
-                x=0.1,
+                x=0.0,
                 xanchor="left",
-                y=1.15,
+                y=1.09,
                 yanchor="top"
             ),
         ]
@@ -275,7 +275,7 @@ def create_interactive_trends_chart(df_adj_sorted, quarterly_trends, valid_data,
         bgcolor="rgba(255,255,255,0.9)",
         bordercolor="black",
         borderwidth=1,
-        font=dict(size=10)
+        font=dict(size=10, color="black")
     )
     
     return fig
@@ -295,18 +295,36 @@ def create_ensemble_predictions(df_adj_sorted, predictions, methods_info):
         y=df_adj_sorted['change_30d_avg'],
         mode='lines',
         name='30-Day Average',
-        line=dict(color='blue', width=2)
+        line=dict(color='#5B9BD5', width=2)  # Softer blue to match interactive trends
     ))
     
     # Add prediction points
-    colors = ['red', 'orange', 'green', 'purple', 'brown']
+    colors = ['#FF4444', '#FFB74D', '#00C853', '#BA68C8', '#8D6E63']  # More vibrant red, softer orange, more vibrant green, softer purple, softer brown
     for i, (method, pred_date) in enumerate(sorted_predictions):
+        method_display = method.replace("_", " ").title()
+        
+        # Create detailed hover text with proper formatting
+        hover_text = f"<b>{method_display} Method</b><br>"
+        hover_text += f"Predicted Date: <b>{pred_date.strftime('%B %d, %Y')}</b><br>"
+        hover_text += f"Days from now: <b>{(pred_date - datetime.now()).days}</b><br>"
+        
+        # Add method-specific information if available
+        if method in methods_info:
+            method_info = methods_info[method]
+            if 'description' in method_info:
+                hover_text += f"Method: {method_info['description']}<br>"
+            if 'r_squared' in method_info:
+                hover_text += f"R-squared = {method_info['r_squared']:.3f}<br>"
+            if 'slope' in method_info:
+                hover_text += f"Slope: {method_info['slope']:.2e}"
+        
         fig_ensemble.add_trace(go.Scatter(
             x=[pred_date],
             y=[0],
             mode='markers',
-            name=f'{method.replace("_", " ").title()} Prediction',
-            marker=dict(color=colors[i % len(colors)], size=12, symbol='star')
+            name=f'{method_display} Prediction',
+            marker=dict(color=colors[i % len(colors)], size=15, symbol='star'),  # Slightly larger markers
+            hovertemplate=hover_text + '<extra></extra>'  # Custom hover template only
         ))
     
     # Add prediction range
@@ -332,8 +350,10 @@ def create_ensemble_predictions(df_adj_sorted, predictions, methods_info):
         xaxis_title='Date',
         yaxis_title='Supply Change',
         height=700,
-        hovermode='x unified',
-        template='plotly_white'
+        hovermode='closest',  # Changed from 'x unified' to allow individual hover boxes
+        template='plotly_white',
+        # Ensure hover boxes have enough space
+        margin=dict(l=50, r=50, t=100, b=50)
     )
     
     fig_ensemble.update_xaxes(
@@ -355,7 +375,7 @@ def create_ensemble_predictions(df_adj_sorted, predictions, methods_info):
         bgcolor="rgba(255,255,255,0.9)",
         bordercolor="blue",
         borderwidth=2,
-        font=dict(size=12)
+        font=dict(size=12, color="black")
     )
     
     return fig_ensemble

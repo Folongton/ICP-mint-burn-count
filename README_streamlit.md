@@ -23,12 +23,11 @@ This Streamlit application provides interactive analysis of ICP supply change da
   - Linear extrapolation from overall trend
   - Recent quarterly trend projection
   - Moving average trend analysis
-  - Acceleration-based modeling (when applicable)
 - Confidence assessment based on prediction spread
 - Detailed prediction table with dates and statistics
 
 ### ⚡ Speed of Change Analysis
-- First derivative analysis showing acceleration/deceleration
+- First derivative analysis showing rate of change patterns
 - Multiple smoothing levels (daily, 7-day avg, 30-day avg)
 - Speed statistics and extremes identification
 
@@ -70,7 +69,7 @@ The app will open in your default web browser at `http://localhost:8501`
    - Use dropdown menus in trend charts to switch between timeframes
    - Hover over data points for detailed information
 3. **Predictions**: View ensemble predictions with confidence assessments
-4. **Speed Analysis**: Analyze acceleration and deceleration patterns
+4. **Speed Analysis**: Analyze rate of change patterns
 
 ## Data Requirements
 

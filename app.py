@@ -9,10 +9,9 @@ from scipy import stats
 # Import our custom modules
 from src.streamlit_utils import load_data, create_interactive_trends_chart, create_ensemble_predictions
 from src.prediction_models import (
-    predict_zero_crossing_linear, 
+    predict_zero_crossing_linear,
     predict_zero_from_recent_trend,
     predict_zero_from_moving_average,
-    predict_zero_with_acceleration,
     ensemble_zero_prediction
 )
 from src.data_refresh import get_fresh_data
