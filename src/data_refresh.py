@@ -234,8 +234,8 @@ class ICPDataRetriever:
                     start_date = datetime.now() - timedelta(days=30)
             else:
                 st.info("📥 No existing data found. Fetching initial dataset...")
-                # No existing data, fetch last 2 years
-                start_date = datetime.now() - timedelta(days=730)
+                # No existing data, fetch last ~4 years
+                start_date = datetime.now() - timedelta(days=1500)
             
             # Fetch new data
             new_data = self.fetch_icp_supply_data(start_date)
