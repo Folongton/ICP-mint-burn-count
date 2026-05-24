@@ -15,8 +15,18 @@ from src.prediction_models import (
     ensemble_zero_prediction
 )
 from src.data_refresh import get_fresh_data
-from src.prophet_model import run_prophet_forecast
-from src.lstm_model import run_lstm_forecast
+
+try:
+    from src.prophet_model import run_prophet_forecast
+    PROPHET_AVAILABLE = True
+except ImportError:
+    PROPHET_AVAILABLE = False
+
+try:
+    from src.lstm_model import run_lstm_forecast
+    LSTM_AVAILABLE = True
+except ImportError:
+    LSTM_AVAILABLE = False
 
 # Page configuration
 st.set_page_config(
@@ -114,14 +124,15 @@ def load_and_process_data():
         return None, None, None, None, None
 
 
-@st.cache_data
-def get_prophet_forecast(df_adj_sorted, forecast_days=365):
-    return run_prophet_forecast(df_adj_sorted, forecast_days)
+if PROPHET_AVAILABLE:
+    @st.cache_data
+    def get_prophet_forecast(df_adj_sorted, forecast_days=365):
+        return run_prophet_forecast(df_adj_sorted, forecast_days)
 
-
-@st.cache_data
-def get_lstm_forecast(df_adj_sorted, lookback=30, forecast_days=365, n_mc_samples=100):
-    return run_lstm_forecast(df_adj_sorted, lookback, forecast_days, n_mc_samples)
+if LSTM_AVAILABLE:
+    @st.cache_data
+    def get_lstm_forecast(df_adj_sorted, lookback=30, forecast_days=365, n_mc_samples=100):
+        return run_lstm_forecast(df_adj_sorted, lookback, forecast_days, n_mc_samples)
 
 
 def main():
@@ -165,13 +176,22 @@ def main():
         show_ensemble_predictions(df_adj_sorted, slope, intercept, valid_data, r_value)
 
     elif analysis_type == "🔮 Prophet Forecast":
-        show_prophet_predictions(df_adj_sorted)
+        if not PROPHET_AVAILABLE:
+            st.error("⚠️ Prophet is not available on this platform (requires Python <3.14). Run locally to use this feature.")
+        else:
+            show_prophet_predictions(df_adj_sorted)
 
     elif analysis_type == "🤖 LSTM Forecast":
-        show_lstm_predictions(df_adj_sorted)
+        if not LSTM_AVAILABLE:
+            st.error("⚠️ LSTM/TensorFlow is not available on this platform (requires Python <3.14). Run locally to use this feature.")
+        else:
+            show_lstm_predictions(df_adj_sorted)
 
     elif analysis_type == "📊🤖 Combined Forecast":
-        show_combined_predictions(df_adj_sorted)
+        if not PROPHET_AVAILABLE or not LSTM_AVAILABLE:
+            st.error("⚠️ Combined Forecast requires Prophet and TensorFlow, which are not available on this platform (requires Python <3.14). Run locally to use this feature.")
+        else:
+            show_combined_predictions(df_adj_sorted)
 
 def show_data_overview(df_adj_sorted, slope, r_value):
     """Display data overview and basic statistics"""
