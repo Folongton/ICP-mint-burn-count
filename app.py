@@ -15,6 +15,8 @@ from src.prediction_models import (
     ensemble_zero_prediction
 )
 from src.data_refresh import get_fresh_data
+from src.prophet_model import run_prophet_forecast
+from src.lstm_model import run_lstm_forecast
 
 # Page configuration
 st.set_page_config(
@@ -111,6 +113,17 @@ def load_and_process_data():
         st.error(f"Error loading data: {str(e)}")
         return None, None, None, None, None
 
+
+@st.cache_data
+def get_prophet_forecast(df_adj_sorted, forecast_days=365):
+    return run_prophet_forecast(df_adj_sorted, forecast_days)
+
+
+@st.cache_data
+def get_lstm_forecast(df_adj_sorted, lookback=30, forecast_days=365, n_mc_samples=100):
+    return run_lstm_forecast(df_adj_sorted, lookback, forecast_days, n_mc_samples)
+
+
 def main():
     # Header
     st.markdown('<h1 class="main-header">📈 ICP Supply Analysis Dashboard</h1>', unsafe_allow_html=True)
@@ -131,21 +144,30 @@ def main():
     # Analysis selection
     analysis_type = st.sidebar.selectbox(
         "Select Analysis Type",
-        ["📈 Interactive Trends", "🎯 Zero Crossing Predictions", "📊 Data Overview", "⚡ Speed of Change"]
+        [
+            "📈 Interactive Trends",
+            "🎯 Zero Crossing Predictions",
+            "📊 Data Overview",
+            "🔮 Prophet Forecast",
+            "🤖 LSTM Forecast",
+        ]
     )
-    
+
     # Main content area
     if analysis_type == "📊 Data Overview":
         show_data_overview(df_adj_sorted, slope, r_value)
-    
+
     elif analysis_type == "📈 Interactive Trends":
         show_interactive_trends(df_adj_sorted, valid_data, slope, intercept, r_value)
-    
+
     elif analysis_type == "🎯 Zero Crossing Predictions":
         show_ensemble_predictions(df_adj_sorted, slope, intercept, valid_data, r_value)
-    
-    elif analysis_type == "⚡ Speed of Change":
-        show_speed_of_change(df_adj_sorted)
+
+    elif analysis_type == "🔮 Prophet Forecast":
+        show_prophet_predictions(df_adj_sorted)
+
+    elif analysis_type == "🤖 LSTM Forecast":
+        show_lstm_predictions(df_adj_sorted)
 
 def show_data_overview(df_adj_sorted, slope, r_value):
     """Display data overview and basic statistics"""
@@ -183,8 +205,13 @@ def show_data_overview(df_adj_sorted, slope, r_value):
         st.write(f"**End Date:** {df_adj_sorted['date_dt'].max().strftime('%Y-%m-%d')}")
     
     # Recent data table
-    st.subheader("📋 Recent Data (Last 10 Days)")
-    recent_data = df_adj_sorted[['date', 'supply_change', 'change_7d_avg', 'change_30d_avg']].tail(10)
+    st.subheader("📋 Recent Data (Last 365 Days)")
+    recent_data = (
+        df_adj_sorted[['date', 'supply_change', 'change_7d_avg', 'change_30d_avg']]
+        .tail(365)
+        .sort_values('date', ascending=False)
+        .copy()
+    )
     recent_data['supply_change'] = recent_data['supply_change'].apply(lambda x: f"{x:,.0f}")
     recent_data['change_7d_avg'] = recent_data['change_7d_avg'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
     recent_data['change_30d_avg'] = recent_data['change_30d_avg'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A")
@@ -329,71 +356,239 @@ def show_ensemble_predictions(df_adj_sorted, slope, intercept, valid_data, r_val
         with col3:
             st.metric("Average Prediction", avg_date.strftime('%Y-%m-%d'))
 
-def show_speed_of_change(df_adj_sorted):
-    """Display speed of change analysis"""
-    st.markdown('<h2 class="sub-header">⚡ Speed of Change Analysis</h2>', unsafe_allow_html=True)
-    
-    # Calculate derivatives
-    df_adj_sorted['supply_change_derivative'] = np.gradient(df_adj_sorted['supply_change'])
-    df_adj_sorted['derivative_7d_avg'] = df_adj_sorted['supply_change_derivative'].rolling(window=7).mean()
-    df_adj_sorted['derivative_30d_avg'] = df_adj_sorted['supply_change_derivative'].rolling(window=30).mean()
-    
-    # Create speed of change chart
-    fig_derivative = go.Figure()
-    
-    # Add traces
-    fig_derivative.add_trace(go.Scatter(
-        x=df_adj_sorted['date_dt'], 
-        y=df_adj_sorted['supply_change_derivative'],
+def show_prophet_predictions(df_adj_sorted):
+    """Display Prophet model forecast for next 365 days"""
+    st.markdown('<h2 class="sub-header">🔮 Prophet Forecast</h2>', unsafe_allow_html=True)
+
+    with st.expander("ℹ️ About This Model", expanded=False):
+        st.markdown("""
+        **Facebook Prophet** is an additive time-series forecasting model designed for daily data
+        with strong seasonal effects.
+
+        - **Seasonality**: Yearly seasonality enabled; daily and weekly disabled
+        - **Confidence intervals**: 95% uncertainty bands (yhat_lower / yhat_upper)
+        - **History shown**: Last 365 days of observed supply change
+        - **Forecast horizon**: Next 365 days
+        """)
+
+    with st.spinner('Fitting Prophet model...'):
+        forecast_df = get_prophet_forecast(df_adj_sorted, forecast_days=365)
+
+    last_date = df_adj_sorted['date_dt'].max()
+    hist_start = last_date - timedelta(days=365)
+    hist_data = df_adj_sorted[df_adj_sorted['date_dt'] >= hist_start]
+
+    future_forecast = forecast_df[forecast_df['ds'] > last_date].copy()
+
+    fig = go.Figure()
+
+    # Historical actual
+    fig.add_trace(go.Scatter(
+        x=hist_data['date_dt'],
+        y=hist_data['supply_change'],
         mode='lines',
-        name='Daily Speed of Change',
-        line=dict(color='lightgray', width=1),
-        opacity=0.5
+        name='Actual (Last 365 Days)',
+        line=dict(color='#5B9BD5', width=2),
+        hovertemplate='<b>Actual</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
     ))
-    
-    fig_derivative.add_trace(go.Scatter(
-        x=df_adj_sorted['date_dt'], 
-        y=df_adj_sorted['derivative_7d_avg'],
+
+    # CI upper boundary (invisible anchor for fill)
+    fig.add_trace(go.Scatter(
+        x=future_forecast['ds'],
+        y=future_forecast['yhat_upper'],
         mode='lines',
-        name='7-Day Avg Speed',
-        line=dict(color='orange', width=2)
+        name='95% CI Upper',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip',
     ))
-    
-    fig_derivative.add_trace(go.Scatter(
-        x=df_adj_sorted['date_dt'], 
-        y=df_adj_sorted['derivative_30d_avg'],
+
+    # CI lower boundary + fill between upper and lower
+    fig.add_trace(go.Scatter(
+        x=future_forecast['ds'],
+        y=future_forecast['yhat_lower'],
         mode='lines',
-        name='30-Day Avg Speed',
-        line=dict(color='blue', width=2)
+        name='95% Confidence Interval',
+        fill='tonexty',
+        fillcolor='rgba(255,140,0,0.20)',
+        line=dict(width=0),
+        hovertemplate='<b>95% CI</b><br>Date: %{x}<br>Lower: %{y:.0f}<extra></extra>'
     ))
-    
-    # Add zero reference line
-    fig_derivative.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
-    
-    # Update layout
-    fig_derivative.update_layout(
-        title='ICP Supply Change - Speed of Change Analysis (1st Derivative)',
+
+    # Forecast mean line (drawn on top of CI band)
+    fig.add_trace(go.Scatter(
+        x=future_forecast['ds'],
+        y=future_forecast['yhat'],
+        mode='lines',
+        name='Prophet Forecast',
+        line=dict(color='#FF8C00', width=2, dash='dash'),
+        hovertemplate='<b>Forecast</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    # Vertical line at last observed date
+    fig.add_vline(
+        x=last_date.timestamp() * 1000,
+        line_dash='dash', line_color='gray', opacity=0.6,
+        annotation_text='Last Observed', annotation_position='top right'
+    )
+
+    fig.update_layout(
+        title='ICP Supply Change — Prophet Forecast (Next 365 Days)',
         xaxis_title='Date',
-        yaxis_title='Speed of Change (Derivative of Supply Change)',
+        yaxis_title='Supply Change (ICP)',
         height=600,
         hovermode='x unified',
-        template='plotly_white'
+        template='plotly_white',
     )
-    
-    st.plotly_chart(fig_derivative, use_container_width=True)
-    
-    # Speed statistics
-    st.subheader("📊 Speed Statistics")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Mean Speed", f"{df_adj_sorted['supply_change_derivative'].mean():.2e}")
-    with col2:
-        st.metric("Std Dev", f"{df_adj_sorted['supply_change_derivative'].std():.2e}")
-    with col3:
-        st.metric("Max Acceleration", f"{df_adj_sorted['supply_change_derivative'].max():.2e}")
-    with col4:
-        st.metric("Max Deceleration", f"{df_adj_sorted['supply_change_derivative'].min():.2e}")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📋 Next 30-Day Forecast")
+    table_df = future_forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].head(30).copy()
+    table_df.columns = ['Date', 'Forecast', 'Lower (95%)', 'Upper (95%)']
+    table_df['Date'] = table_df['Date'].dt.strftime('%Y-%m-%d')
+    for col in ['Forecast', 'Lower (95%)', 'Upper (95%)']:
+        table_df[col] = table_df[col].apply(lambda x: f"{x:,.0f}")
+    st.dataframe(table_df, use_container_width=True)
+
+
+def show_lstm_predictions(df_adj_sorted):
+    """Display LSTM model forecast with Monte Carlo Dropout CI for next 365 days"""
+    st.markdown('<h2 class="sub-header">🤖 LSTM Forecast</h2>', unsafe_allow_html=True)
+
+    with st.expander("ℹ️ About This Model", expanded=False):
+        st.markdown("""
+        **LSTM (Long Short-Term Memory)** is a recurrent neural network suited to sequential data.
+
+        - **Architecture**: LSTM(64) → Dropout(0.2) → LSTM(32) → Dropout(0.2) → Dense(1)
+        - **Lookback window**: 30 days (each prediction uses the prior 30 days as input)
+        - **Training**: 50 epochs, Adam optimizer, MSE loss, 10% validation split
+        - **Confidence intervals**: 95% CI estimated via **Monte Carlo Dropout** —
+          the model is run 100 times with dropout active during inference;
+          mean ± 1.96 × std across paths forms the uncertainty band.
+        - **Forecast horizon**: Next 365 days (recursive, autoregressive)
+
+        ⚠️ Recursive forecasting compounds uncertainty; the CI band widens further out.
+        """)
+
+    # Session-state cache — recomputes only when new data arrives (key includes last date)
+    _cache_key = f"lstm_result_{df_adj_sorted['date_dt'].max().date()}"
+    if _cache_key not in st.session_state:
+        _TOTAL_EPOCHS = 50
+        _TOTAL_STEPS = 365
+        _progress_bar = st.progress(0.0)
+        _status = st.empty()
+
+        def _on_progress(phase: str, current: int, total: int) -> None:
+            if phase == "training":
+                pct = current / _TOTAL_EPOCHS * 0.70
+                left = _TOTAL_EPOCHS - current
+                _progress_bar.progress(pct)
+                _status.markdown(
+                    f"🏋️ **Training model** — epoch **{current} / {_TOTAL_EPOCHS}** "
+                    f"| **{left}** epochs left | **{int(pct * 100)}%** done"
+                )
+            else:  # inference
+                pct = 0.70 + current / _TOTAL_STEPS * 0.30
+                left = _TOTAL_STEPS - current
+                _progress_bar.progress(pct)
+                _status.markdown(
+                    f"🎲 **MC sampling** — step **{current} / {_TOTAL_STEPS}** "
+                    f"| **{left}** steps left | **{int(pct * 100)}%** done"
+                )
+
+        _result = run_lstm_forecast(
+            df_adj_sorted, lookback=30, forecast_days=365, n_mc_samples=100,
+            progress_callback=_on_progress,
+        )
+        _progress_bar.progress(1.0)
+        _status.markdown("✅ **Done! Forecast ready.**")
+        st.session_state[_cache_key] = _result
+        _progress_bar.empty()
+        _status.empty()
+
+    forecast_mean, forecast_lower, forecast_upper, forecast_dates = st.session_state[_cache_key]
+
+    last_date = df_adj_sorted['date_dt'].max()
+    hist_start = last_date - timedelta(days=365)
+    hist_data = df_adj_sorted[df_adj_sorted['date_dt'] >= hist_start]
+
+    fig = go.Figure()
+
+    # Historical actual
+    fig.add_trace(go.Scatter(
+        x=hist_data['date_dt'],
+        y=hist_data['supply_change'],
+        mode='lines',
+        name='Actual (Last 365 Days)',
+        line=dict(color='#5B9BD5', width=2),
+        hovertemplate='<b>Actual</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    # CI upper boundary (invisible anchor for fill)
+    fig.add_trace(go.Scatter(
+        x=forecast_dates,
+        y=forecast_upper,
+        mode='lines',
+        name='95% CI Upper',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip',
+    ))
+
+    # CI lower boundary + fill
+    fig.add_trace(go.Scatter(
+        x=forecast_dates,
+        y=forecast_lower,
+        mode='lines',
+        name='95% Confidence Interval',
+        fill='tonexty',
+        fillcolor='rgba(231,76,60,0.15)',
+        line=dict(width=0),
+        hovertemplate='<b>95% CI</b><br>Date: %{x}<br>Lower: %{y:.0f}<extra></extra>'
+    ))
+
+    # Forecast mean line (drawn on top of CI band)
+    fig.add_trace(go.Scatter(
+        x=forecast_dates,
+        y=forecast_mean,
+        mode='lines',
+        name='LSTM Forecast',
+        line=dict(color='#E74C3C', width=2, dash='dash'),
+        hovertemplate='<b>Forecast</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    # Vertical line at last observed date
+    fig.add_vline(
+        x=last_date.timestamp() * 1000,
+        line_dash='dash', line_color='gray', opacity=0.6,
+        annotation_text='Last Observed', annotation_position='top right'
+    )
+
+    fig.update_layout(
+        title='ICP Supply Change — LSTM Forecast (Next 365 Days)',
+        xaxis_title='Date',
+        yaxis_title='Supply Change (ICP)',
+        height=600,
+        hovermode='x unified',
+        template='plotly_white',
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "LSTM trained on full history with 30-day lookback. "
+        "Confidence intervals via Monte Carlo Dropout (100 stochastic forward passes, 95% CI)."
+    )
+
+    st.subheader("📋 Next 30-Day Forecast")
+    table_df = pd.DataFrame({
+        'Date': [d.strftime('%Y-%m-%d') for d in forecast_dates[:30]],
+        'Forecast': [f"{v:,.0f}" for v in forecast_mean[:30]],
+        'Lower (95%)': [f"{v:,.0f}" for v in forecast_lower[:30]],
+        'Upper (95%)': [f"{v:,.0f}" for v in forecast_upper[:30]],
+    })
+    st.dataframe(table_df, use_container_width=True)
+
 
 if __name__ == "__main__":
     main()

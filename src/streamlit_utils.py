@@ -349,8 +349,11 @@ def create_interactive_trends_chart(df_adj_sorted, valid_data, slope, intercept,
         template='plotly_white'
     )
 
-    # Set x-axis to show monthly ticks
+    # Set x-axis with initial 6-month zoom; full history remains accessible via pan/zoom
+    _last_date = df_adj_sorted['date_dt'].max()
+    _six_months_ago = _last_date - timedelta(days=182)
     fig.update_xaxes(
+        range=[_six_months_ago, _last_date],
         dtick="M1",
         tickformat="%Y-%m-%d",
         tickangle=45
