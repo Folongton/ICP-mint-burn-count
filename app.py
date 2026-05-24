@@ -150,6 +150,7 @@ def main():
             "📊 Data Overview",
             "🔮 Prophet Forecast",
             "🤖 LSTM Forecast",
+            "📊🤖 Combined Forecast",
         ]
     )
 
@@ -168,6 +169,9 @@ def main():
 
     elif analysis_type == "🤖 LSTM Forecast":
         show_lstm_predictions(df_adj_sorted)
+
+    elif analysis_type == "📊🤖 Combined Forecast":
+        show_combined_predictions(df_adj_sorted)
 
 def show_data_overview(df_adj_sorted, slope, r_value):
     """Display data overview and basic statistics"""
@@ -586,6 +590,142 @@ def show_lstm_predictions(df_adj_sorted):
         'Forecast': [f"{v:,.0f}" for v in forecast_mean[:30]],
         'Lower (95%)': [f"{v:,.0f}" for v in forecast_lower[:30]],
         'Upper (95%)': [f"{v:,.0f}" for v in forecast_upper[:30]],
+    })
+    st.dataframe(table_df, use_container_width=True)
+
+
+def show_combined_predictions(df_adj_sorted):
+    """Display Prophet and LSTM forecasts together in one chart and one table."""
+    st.markdown('<h2 class="sub-header">📊🤖 Combined Forecast: Prophet vs LSTM</h2>', unsafe_allow_html=True)
+
+    with st.expander("ℹ️ About This View", expanded=False):
+        st.markdown("""
+        Side-by-side comparison of **Prophet** and **LSTM** forecasts for daily ICP supply change.
+
+        - **Prophet** (orange): Additive model with yearly seasonality; 95% uncertainty bands.
+        - **LSTM** (red): Recurrent neural network with Monte Carlo Dropout 95% CI.
+        - Both models are trained on the full available history and forecast 365 days ahead.
+        """)
+
+    # --- Prophet (uses @st.cache_data wrapper, instant on re-runs) ---
+    with st.spinner('Fitting Prophet model...'):
+        forecast_df = get_prophet_forecast(df_adj_sorted, forecast_days=365)
+
+    last_date = df_adj_sorted['date_dt'].max()
+    future_prophet = forecast_df[forecast_df['ds'] > last_date].copy()
+
+    # --- LSTM (session-state cached with live progress bar) ---
+    _cache_key = f"lstm_result_{last_date.date()}"
+    if _cache_key not in st.session_state:
+        _TOTAL_EPOCHS = 50
+        _TOTAL_STEPS = 365
+        _progress_bar = st.progress(0.0)
+        _status = st.empty()
+
+        def _on_progress(phase: str, current: int, total: int) -> None:
+            if phase == "training":
+                pct = current / _TOTAL_EPOCHS * 0.70
+                left = _TOTAL_EPOCHS - current
+                _progress_bar.progress(pct)
+                _status.markdown(
+                    f"🏋️ **Training LSTM model** — epoch **{current} / {_TOTAL_EPOCHS}** "
+                    f"| **{left}** epochs left | **{int(pct * 100)}%** done"
+                )
+            else:
+                pct = 0.70 + current / _TOTAL_STEPS * 0.30
+                left = _TOTAL_STEPS - current
+                _progress_bar.progress(pct)
+                _status.markdown(
+                    f"🎲 **MC sampling** — step **{current} / {_TOTAL_STEPS}** "
+                    f"| **{left}** steps left | **{int(pct * 100)}%** done"
+                )
+
+        _result = run_lstm_forecast(
+            df_adj_sorted, lookback=30, forecast_days=365, n_mc_samples=100,
+            progress_callback=_on_progress,
+        )
+        _progress_bar.progress(1.0)
+        _status.markdown("✅ **Done! Forecast ready.**")
+        st.session_state[_cache_key] = _result
+        _progress_bar.empty()
+        _status.empty()
+
+    forecast_mean, forecast_lower, forecast_upper, forecast_dates = st.session_state[_cache_key]
+
+    # --- Historical data (last 365 days) ---
+    hist_start = last_date - timedelta(days=365)
+    hist_data = df_adj_sorted[df_adj_sorted['date_dt'] >= hist_start]
+
+    # --- Combined chart ---
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=hist_data['date_dt'],
+        y=hist_data['supply_change'],
+        mode='lines',
+        name='Actual (Last 365 Days)',
+        line=dict(color='#5B9BD5', width=2),
+        hovertemplate='<b>Actual</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    # Prophet CI band
+    fig.add_trace(go.Scatter(
+        x=future_prophet['ds'], y=future_prophet['yhat_upper'],
+        mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip',
+    ))
+    fig.add_trace(go.Scatter(
+        x=future_prophet['ds'], y=future_prophet['yhat_lower'],
+        mode='lines', name='Prophet 95% CI',
+        fill='tonexty', fillcolor='rgba(255,140,0,0.20)', line=dict(width=0),
+        hovertemplate='<b>Prophet CI</b><br>Date: %{x}<br>Lower: %{y:.0f}<extra></extra>'
+    ))
+    fig.add_trace(go.Scatter(
+        x=future_prophet['ds'], y=future_prophet['yhat'],
+        mode='lines', name='Prophet Forecast',
+        line=dict(color='#FF8C00', width=2, dash='dash'),
+        hovertemplate='<b>Prophet</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    # LSTM CI band
+    fig.add_trace(go.Scatter(
+        x=forecast_dates, y=forecast_upper,
+        mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip',
+    ))
+    fig.add_trace(go.Scatter(
+        x=forecast_dates, y=forecast_lower,
+        mode='lines', name='LSTM 95% CI',
+        fill='tonexty', fillcolor='rgba(231,76,60,0.15)', line=dict(width=0),
+        hovertemplate='<b>LSTM CI</b><br>Date: %{x}<br>Lower: %{y:.0f}<extra></extra>'
+    ))
+    fig.add_trace(go.Scatter(
+        x=forecast_dates, y=forecast_mean,
+        mode='lines', name='LSTM Forecast',
+        line=dict(color='#E74C3C', width=2, dash='dash'),
+        hovertemplate='<b>LSTM</b><br>Date: %{x}<br>Supply Change: %{y:.0f}<extra></extra>'
+    ))
+
+    fig.add_vline(
+        x=last_date.timestamp() * 1000,
+        line_dash='dash', line_color='gray', opacity=0.6,
+        annotation_text='Last Observed', annotation_position='top right'
+    )
+    fig.update_layout(
+        title='ICP Supply Change — Prophet vs LSTM Forecast (Next 365 Days)',
+        xaxis_title='Date', yaxis_title='Supply Change (ICP)',
+        height=620, hovermode='x unified', template='plotly_white',
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- 30-day comparison table (7 columns) ---
+    st.subheader("📋 Next 30-Day Forecast Comparison")
+    table_df = pd.DataFrame({
+        'Date': [d.strftime('%Y-%m-%d') for d in future_prophet['ds'].head(30)],
+        'Prophet Lower (95%)': [f"{v:,.0f}" for v in future_prophet['yhat_lower'].head(30)],
+        'Prophet Forecast':    [f"{v:,.0f}" for v in future_prophet['yhat'].head(30)],
+        'Prophet Upper (95%)': [f"{v:,.0f}" for v in future_prophet['yhat_upper'].head(30)],
+        'LSTM Lower (95%)':    [f"{v:,.0f}" for v in forecast_lower[:30]],
+        'LSTM Forecast':       [f"{v:,.0f}" for v in forecast_mean[:30]],
+        'LSTM Upper (95%)':    [f"{v:,.0f}" for v in forecast_upper[:30]],
     })
     st.dataframe(table_df, use_container_width=True)
 
